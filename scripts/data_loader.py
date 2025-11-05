@@ -1,3 +1,4 @@
+cat > scripts/data_loader.py << 'ENDOFFILE'
 """
 Funções para carregar dados do Supabase
 """
@@ -141,3 +142,6 @@ def testar_conexao():
 
 if __name__ == "__main__":
     testar_conexao()
+ENDOFFILE
+
+echo "✅ Arquivo scripts/data_loader.py criado"
