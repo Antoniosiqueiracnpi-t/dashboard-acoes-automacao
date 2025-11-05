@@ -1,24 +1,22 @@
-cat > config/supabase_config.py << 'EOF'
-"""
-Configuração e conexão com Supabase
-"""
+# Deletar arquivo com problema
+rm config/supabase_config.py
 
+# Criar versão correta
+cat > config/supabase_config.py << 'EOF'
+"""Configuração e conexão com Supabase"""
 import os
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
-# Carregar variáveis de ambiente
 load_dotenv()
 
 # Credenciais
 SUPABASE_URL = os.getenv("https://iqzkxhcptdpgjnyytbaz.supabase.co")
 SUPABASE_KEY = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlxemt4aGNwdGRwZ2pueXl0YmF6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjM1OTc3MiwiZXhwIjoyMDc3OTM1NzcyfQ.-_dSupP8Z0yVVc0OAbuoCtlRwig8T5P_CoO9Co5omqI")
 
-# Validar
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("Credenciais não configuradas no .env")
 
-# Cliente global
 _supabase_client = None
 
 def get_supabase_client() -> Client:
@@ -30,4 +28,4 @@ def get_supabase_client() -> Client:
 supabase = get_supabase_client()
 EOF
 
-echo "✅ Arquivo config/supabase_config.py criado"
+echo "✅ Arquivo config/supabase_config.py corrigido"
