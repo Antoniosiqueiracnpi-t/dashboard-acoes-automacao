@@ -1,22 +1,16 @@
-# Deletar arquivo com problema
-rm scripts/data_loader.py
-
-# Criar versão correta
-cat > scripts/data_loader.py << 'EOF'
 """Funções para carregar dados do Supabase"""
 import pandas as pd
 from io import BytesIO
-from typing import Tuple, Optional
+from typing import Tuple
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config.supabase_config import supabase
 
 _cache_df = None
 
 def carregar_dados_completos(force_reload: bool = False) -> pd.DataFrame:
-    """Carrega dados do Supabase (funciona no Railway)"""
+    """Carrega dados do Supabase"""
     global _cache_df
     
     if not force_reload and _cache_df is not None:
@@ -26,7 +20,6 @@ def carregar_dados_completos(force_reload: bool = False) -> pd.DataFrame:
     print("📥 Baixando do Supabase...")
     
     try:
-        # Import aqui para evitar erro se config falhar
         from config.supabase_config import supabase
         
         resultado = supabase.table('balancos_trimestrais') \
@@ -79,6 +72,7 @@ def selecionar_balanco_periodo(ticker: str, tipo: str = 'BPA', periodo: str = 't
 
 def listar_todas_empresas() -> list:
     try:
+        from config.supabase_config import supabase
         resultado = supabase.table('empresas_ativas').select('ticker').eq('status', 'ativa').execute()
         return [row['ticker'] for row in resultado.data]
     except:
@@ -113,6 +107,3 @@ def testar_conexao():
 
 if __name__ == "__main__":
     testar_conexao()
-EOF
-
-echo "✅ Arquivo corrigido"
