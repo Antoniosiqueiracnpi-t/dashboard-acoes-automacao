@@ -13,6 +13,77 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+def transformar_wide_para_long(df, tipo_demonstracao):
+    """
+    Transforma dados do formato CVM (wide) para formato Supabase (long)
+    
+    Args:
+        df: DataFrame com dados da CVM
+        tipo_demonstracao: 'DRE', 'BPA', 'BPP', ou 'DFC'
+    
+    Returns:
+        DataFrame transformado no formato: Ticker, Conta, Ano, Trimestre, Valor
+    """
+    
+    print(f"   🔄 Transformando {tipo_demonstracao} para formato long...")
+    
+    try:
+        # Verificar colunas necessárias
+        colunas_necessarias = ['DENOM_CIA', 'DS_CONTA', 'DT_FIM_EXERC', 'VL_CONTA']
+        
+        for col in colunas_necessarias:
+            if col not in df.columns:
+                print(f"   ⚠️  Coluna {col} não encontrada. Colunas disponíveis: {df.columns.tolist()[:10]}")
+                return None
+        
+        # Criar DataFrame limpo
+        df_clean = df[colunas_necessarias].copy()
+        
+        # Limpar valores
+        df_clean = df_clean.dropna(subset=['VL_CONTA', 'DT_FIM_EXERC'])
+        
+        # Converter valor para numérico
+        df_clean['VL_CONTA'] = pd.to_numeric(df_clean['VL_CONTA'], errors='coerce')
+        df_clean = df_clean.dropna(subset=['VL_CONTA'])
+        
+        # Extrair Ano e Trimestre da data
+        df_clean['DT_FIM_EXERC'] = pd.to_datetime(df_clean['DT_FIM_EXERC'], errors='coerce')
+        df_clean = df_clean.dropna(subset=['DT_FIM_EXERC'])
+        
+        df_clean['Ano'] = df_clean['DT_FIM_EXERC'].dt.year
+        df_clean['Trimestre'] = df_clean['DT_FIM_EXERC'].dt.quarter
+        
+        # Mapear nome da empresa para Ticker (simplificado)
+        # TODO: Implementar mapeamento correto CNPJ → Ticker
+        df_clean['Ticker'] = df_clean['DENOM_CIA'].str[:5].str.upper()
+        
+        # Renomear colunas
+        df_long = df_clean[[
+            'Ticker',
+            'DS_CONTA',
+            'Ano',
+            'Trimestre',
+            'VL_CONTA'
+        ]].copy()
+        
+        df_long.columns = ['Ticker', 'Conta', 'Ano', 'Trimestre', 'Valor']
+        
+        # Remover duplicatas
+        df_long = df_long.drop_duplicates(
+            subset=['Ticker', 'Conta', 'Ano', 'Trimestre'],
+            keep='last'
+        )
+        
+        print(f"   ✅ Transformado: {len(df_long):,} registros únicos")
+        
+        return df_long
+        
+    except Exception as e:
+        print(f"   ❌ Erro na transformação: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 def obter_lista_empresas():
     """Retorna lista de CNPJs das 133 empresas monitoradas"""
     from config.supabase_config import supabase
@@ -142,10 +213,24 @@ def baixar_e_processar_itr(ano, arquivo, empresas):
                     total_depois = len(df_filtrado)
                     print(f"   • Registros filtrados: {total_depois:,}")
                     
-                    dados_processados[tipo] = {
-                        'dataframe': df_filtrado,
-                        'registros': total_depois
-                    }
+
+                    # Transformar para formato long
+                    df_long = transformar_wide_para_long(df_filtrado, tipo)
+                    
+                    if df_long is not None:
+                        dados_processados[tipo] = {
+                            'dataframe': df_long,
+                            'registros': len(df_long),
+                            'formato': 'long'
+                        }
+                        print(f"   ✅ Pronto para Supabase: {len(df_long):,} registros")
+                    else:
+                        print(f"   ⚠️  Falha na transformação, mantendo formato original")
+                        dados_processados[tipo] = {
+                            'dataframe': df_filtrado,
+                            'registros': total_depois,
+                            'formato': 'wide'
+                        }                
                 else:
                     print(f"   ⚠️  Coluna DENOM_CIA não encontrada")
                     dados_processados[tipo] = {
@@ -242,7 +327,16 @@ def main():
             print(f"   • {tipo}: {registros:,} registros")
         
         print(f"\n   📈 TOTAL: {total_registros:,} registros processados")
-        
+
+        # Mostrar amostra dos dados transformados
+        print(f"\n🔍 AMOSTRA DOS DADOS TRANSFORMADOS:")
+        for tipo in ['DRE']:  # Mostrar só DRE para não poluir o log
+            if tipo in dados and 'dataframe' in dados[tipo]:
+                df_amostra = dados[tipo]['dataframe']
+                print(f"\n   {tipo} - Primeiras 5 linhas:")
+                print(df_amostra.head(5).to_string(index=False))
+                break
+                
         # Atualizar Supabase
         sucesso = atualizar_supabase(dados)
         
