@@ -44,8 +44,24 @@ CNPJS_MONITORADOS = {
     '16590234000176': 'AZZA3', '45242914000105': 'CEAB3', '08402943000152': 'GUAR3',
     '61189288000189': 'AMAR3', '92754738000162': 'LREN3', '33041260065290': 'BHIA3',
     '47960950000121': 'MGLU3', '13217485000111': 'SBFG3', '18328118000109': 'PETZ3',
-    # Adicione mais CNPJs conforme necessário
+    '61486650000183': 'DASA3', '60840055000131': 'FLRY3', '05197443000138': 'HAPV3',
+    '58119199000151': 'ODPV3', '12104241000402': 'ONCO3', '11992680000193': 'QUAL3',
+    '06047087000139': 'RDOR3', '12108897000150': 'DMVF3', '02932074000191': 'HYPE3',
+    '06626253000151': 'PGMN3', '45453214000151': 'PFRM3', '61585865000151': 'RADL3',
+    '82901000000127': 'INTB3', '59717553000102': 'MLAS3', '53113791000122': 'TOTS3',
+    '08170849000115': 'DESK3', '02558157000162': 'VIVT3', '08364948000138': 'ALUP3',
+    '17155730000164': 'CMIG4', '76483817000120': 'CPLE3', '02429144000193': 'CPFE3',
+    '00001180000126': 'ELET3', '00864214000106': 'ENGI3', '04423567000121': 'ENEV3',
+    '02474103000119': 'EGIE3', '03220438000173': 'EQTL3', '01083200000118': 'NEOE3',
+    '07859971000130': 'TAEE3', '12648266000124': 'AMBP3', '17281106000103': 'CSMG3',
+    '59285411000113': 'BPAN4', '92702067000196': 'BRSR6', '60746948000112': 'BBDC4',
+    '00000000000191': 'BBAS3', '30306294000145': 'BPAC3', '60872504000123': 'ITUB4',
+    '90400888000142': 'SANB3', '02149205000169': 'PSSA3', '42278473000103': 'WIZC3',
+    '60543816000193': 'IGTI3', '09041168000110': 'LOGG3', '07816890000153': 'MULT3',
+    '29780061000109': 'SCAR3', '08078847000109': 'LPSB3', '61532644000115': 'ITSA4',
+    '07415333000120': 'SIMH3',
 }
+
 
 def obter_ultimos_trimestres_por_empresa():
     """Consulta Supabase para descobrir qual o último trimestre de cada empresa"""
@@ -470,8 +486,7 @@ def atualizar_supabase(dados):
             'tipo_atualizacao': 'automatica',
             'status': 'sucesso',
             'registros_novos': total_registros,
-            'registros_total': len(df_merged),
-            'mensagem': f'Adicionados {total_registros:,} novos registros. Total agora: {len(df_merged):,}',
+            'mensagem': f'Upload completo! Adicionados {total_registros:,} novos registros. Total agora: {len(df_merged):,}. Arquivo: {novo_arquivo}',
             'data_execucao': datetime.now().isoformat()
         }
         
