@@ -171,22 +171,40 @@ def atualizar_supabase(dados):
     from config.supabase_config import supabase
     
     try:
+        # Calcular total de registros
+        total_registros = 0
+        tipos_processados = []
+        
+        for tipo, info in dados.items():
+            if isinstance(info, dict) and 'registros' in info:
+                total_registros += info['registros']
+                tipos_processados.append(tipo)
+            else:
+                # Fallback para formato antigo
+                total_registros += info
+                tipos_processados.append(tipo)
+        
         # Registrar atualização no log
         log = {
             'tipo_atualizacao': 'automatica',
             'status': 'sucesso',
-            'registros_novos': sum(dados.values()) if dados else 0,
-            'mensagem': f'Dados processados: {dados}',
+            'registros_novos': total_registros,
+            'mensagem': f'Processados {len(tipos_processados)} tipos: {", ".join(tipos_processados)}. Total: {total_registros:,} registros',
             'data_execucao': datetime.now().isoformat()
         }
         
         supabase.table('log_atualizacoes').insert(log).execute()
         
-        print("✅ Log registrado no Supabase")
+        print(f"✅ Log registrado no Supabase")
+        print(f"   • Total de registros: {total_registros:,}")
+        print(f"   • Tipos processados: {', '.join(tipos_processados)}")
+        
         return True
         
     except Exception as e:
         print(f"❌ Erro ao atualizar Supabase: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def main():
