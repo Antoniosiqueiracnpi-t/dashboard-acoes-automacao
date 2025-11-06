@@ -213,7 +213,7 @@ def main():
     
     # Baixar e processar
     print(f"\n🔄 Iniciando processamento do ano {ano}...")
-    dados = baixar_e_processar_itr(ano, arquivo)
+    dados = baixar_e_processar_itr(ano, arquivo, empresas)
     
     if dados:
         print(f"\n📊 Resumo do processamento:")
