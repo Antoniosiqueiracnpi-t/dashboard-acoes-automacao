@@ -16,22 +16,39 @@ from config.supabase_config import supabase
 _cache_df = None
 
 def carregar_dados_completos(force_reload: bool = False) -> pd.DataFrame:
+    """Carrega dados do Supabase (funciona no Railway)"""
     global _cache_df
+    
     if not force_reload and _cache_df is not None:
         print("✓ Usando cache")
         return _cache_df.copy()
+    
     print("📥 Baixando do Supabase...")
+    
     try:
-        resultado = supabase.table('balancos_trimestrais').select('arquivo_path, arquivo_nome, registros_total').eq('status', 'ativo').order('data_upload', desc=True).limit(1).execute()
+        # Import aqui para evitar erro se config falhar
+        from config.supabase_config import supabase
+        
+        resultado = supabase.table('balancos_trimestrais') \
+            .select('arquivo_path, arquivo_nome, registros_total') \
+            .eq('status', 'ativo') \
+            .order('data_upload', desc=True) \
+            .limit(1) \
+            .execute()
+        
         if not resultado.data:
             raise ValueError("Nenhum arquivo encontrado")
+        
         arquivo_path = resultado.data[0]['arquivo_path']
         print(f"   Arquivo: {resultado.data[0]['arquivo_nome']}")
+        
         response = supabase.storage.from_('balancos').download(arquivo_path)
         df = pd.read_parquet(BytesIO(response))
+        
         _cache_df = df
-        print(f"✓ {len(df):,} registros carregados")
+        print(f"✅ {len(df):,} registros carregados")
         return df.copy()
+        
     except Exception as e:
         print(f"❌ Erro: {e}")
         raise
