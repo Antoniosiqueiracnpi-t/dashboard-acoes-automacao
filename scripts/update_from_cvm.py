@@ -84,6 +84,146 @@ def transformar_wide_para_long(df, tipo_demonstracao):
         traceback.print_exc()
         return None
 
+
+def obter_ultimos_trimestres_por_empresa():
+    """
+    Consulta Supabase para descobrir qual o último trimestre de cada empresa
+    
+    Returns:
+        Dict com {Ticker: {'ultimo_ano': 2025, 'ultimo_trimestre': 1}}
+    """
+    
+    print("\n" + "="*70)
+    print("🔍 DETECTANDO ÚLTIMO TRIMESTRE DE CADA EMPRESA NO SUPABASE")
+    print("="*70 + "\n")
+    
+    from config.supabase_config import supabase
+    
+    try:
+        # Baixar dados atuais do Supabase
+        print("📥 Baixando dados atuais do Supabase...")
+        
+        resultado = supabase.table('balancos_trimestrais') \
+            .select('arquivo_path') \
+            .eq('status', 'ativo') \
+            .order('data_upload', desc=True) \
+            .limit(1) \
+            .execute()
+        
+        if not resultado.data:
+            print("⚠️  Nenhum dado encontrado no Supabase")
+            return {}
+        
+        arquivo_path = resultado.data[0]['arquivo_path']
+        
+        # Download do Parquet
+        response = supabase.storage.from_('balancos').download(arquivo_path)
+        df_atual = pd.read_parquet(BytesIO(response))
+        
+        print(f"✅ Carregados {len(df_atual):,} registros atuais")
+        
+        # Agrupar por Ticker e encontrar último trimestre
+        ultimos_trimestres = {}
+        
+        for ticker in df_atual['Ticker'].unique():
+            df_ticker = df_atual[df_atual['Ticker'] == ticker]
+            
+            # Encontrar último ano e trimestre
+            ultimo_ano = df_ticker['Ano'].max()
+            df_ultimo_ano = df_ticker[df_ticker['Ano'] == ultimo_ano]
+            ultimo_trimestre = df_ultimo_ano['Trimestre'].max()
+            
+            ultimos_trimestres[ticker] = {
+                'ultimo_ano': int(ultimo_ano),
+                'ultimo_trimestre': int(ultimo_trimestre)
+            }
+        
+        # Mostrar resumo
+        print(f"\n📊 Resumo dos últimos trimestres por empresa:")
+        print(f"   Total de empresas: {len(ultimos_trimestres)}")
+        
+        # Mostrar alguns exemplos
+        exemplos = list(ultimos_trimestres.items())[:5]
+        for ticker, info in exemplos:
+            print(f"   • {ticker}: {info['ultimo_ano']}-Q{info['ultimo_trimestre']}")
+        
+        print(f"   ... (mais {len(ultimos_trimestres) - 5} empresas)")
+        
+        return ultimos_trimestres
+        
+    except Exception as e:
+        print(f"❌ Erro ao obter últimos trimestres: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
+        
+
+def filtrar_dados_novos(df_transformado, ultimos_trimestres):
+    """
+    Filtra apenas registros mais recentes que o último trimestre de cada empresa
+    
+    Args:
+        df_transformado: DataFrame no formato long (Ticker, Conta, Ano, Trimestre, Valor)
+        ultimos_trimestres: Dict com último trimestre de cada empresa
+    
+    Returns:
+        DataFrame com apenas dados novos
+    """
+    
+    print(f"\n🔍 Filtrando apenas dados novos...")
+    print(f"   Total antes do filtro: {len(df_transformado):,} registros")
+    
+    if not ultimos_trimestres:
+        print(f"   ⚠️  Sem informação de últimos trimestres, mantendo todos os dados")
+        return df_transformado
+    
+    # Lista para armazenar registros novos
+    registros_novos = []
+    
+    # Agrupar por Ticker
+    for ticker in df_transformado['Ticker'].unique():
+        df_ticker = df_transformado[df_transformado['Ticker'] == ticker]
+        
+        # Verificar se temos info do último trimestre dessa empresa
+        if ticker not in ultimos_trimestres:
+            # Empresa nova, adicionar todos os dados
+            registros_novos.append(df_ticker)
+            continue
+        
+        ultimo_ano = ultimos_trimestres[ticker]['ultimo_ano']
+        ultimo_trimestre = ultimos_trimestres[ticker]['ultimo_trimestre']
+        
+        # Filtrar apenas registros APÓS o último trimestre
+        df_novos = df_ticker[
+            (df_ticker['Ano'] > ultimo_ano) |
+            ((df_ticker['Ano'] == ultimo_ano) & (df_ticker['Trimestre'] > ultimo_trimestre))
+        ]
+        
+        if len(df_novos) > 0:
+            registros_novos.append(df_novos)
+    
+    # Concatenar todos os novos registros
+    if registros_novos:
+        df_final = pd.concat(registros_novos, ignore_index=True)
+        print(f"   ✅ Dados novos encontrados: {len(df_final):,} registros")
+        
+        # Mostrar resumo por empresa
+        empresas_com_novos = df_final.groupby('Ticker').size()
+        print(f"\n   📊 Empresas com dados novos: {len(empresas_com_novos)}")
+        
+        # Mostrar exemplos
+        for ticker in list(empresas_com_novos.index[:5]):
+            df_ticker = df_final[df_final['Ticker'] == ticker]
+            anos_trimestres = df_ticker[['Ano', 'Trimestre']].drop_duplicates()
+            periodos = [f"{row['Ano']}-Q{row['Trimestre']}" for _, row in anos_trimestres.iterrows()]
+            print(f"      • {ticker}: {', '.join(periodos)} ({len(df_ticker)} registros)")
+        
+        return df_final
+    else:
+        print(f"   ℹ️  Nenhum dado novo encontrado")
+        return pd.DataFrame()
+
+
 def obter_lista_empresas():
     """Retorna lista de CNPJs das 133 empresas monitoradas"""
     from config.supabase_config import supabase
@@ -142,7 +282,7 @@ def verificar_ultimo_trimestre_disponivel():
         print(f"❌ Erro ao verificar CVM: {e}")
         return None
 
-def baixar_e_processar_itr(ano, arquivo, empresas):
+def baixar_e_processar_itr(ano, arquivo, empresas, ultimos_trimestres):
     """Baixa ZIP da CVM e processa dados filtrados por empresa"""
     
     print(f"\n📥 Baixando {arquivo}...")
@@ -216,6 +356,18 @@ def baixar_e_processar_itr(ano, arquivo, empresas):
 
                     # Transformar para formato long
                     df_long = transformar_wide_para_long(df_filtrado, tipo)
+
+                    if df_long is not None:
+                        # Filtrar apenas dados novos
+                        df_novos = filtrar_dados_novos(df_long, ultimos_trimestres)
+                        
+                        dados_processados[tipo] = {
+                            'dataframe': df_novos,
+                            'registros': len(df_novos),
+                            'formato': 'long',
+                            'somente_novos': True
+                        }
+                        print(f"   ✅ Pronto para Supabase: {len(df_novos):,} registros novos")                    
                     
                     if df_long is not None:
                         dados_processados[tipo] = {
@@ -304,6 +456,9 @@ def main():
     # Carregar empresas
     empresas = obter_lista_empresas()
     
+    # NOVO: Obter últimos trimestres de cada empresa
+    ultimos_trimestres = obter_ultimos_trimestres_por_empresa()
+    
     # Verificar dados disponíveis
     resultado = verificar_ultimo_trimestre_disponivel()
     
@@ -314,9 +469,9 @@ def main():
     
     ano, arquivo = resultado
     
-    # Baixar e processar
+    # Baixar e processar (agora com filtro de dados novos)
     print(f"\n🔄 Iniciando processamento do ano {ano}...")
-    dados = baixar_e_processar_itr(ano, arquivo, empresas)
+    dados = baixar_e_processar_itr(ano, arquivo, empresas, ultimos_trimestres)
     
     if dados:
         print(f"\n📊 Resumo do processamento:")
