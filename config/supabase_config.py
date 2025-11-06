@@ -1,9 +1,12 @@
 import os
 from supabase import create_client, Client
 
-# Credenciais diretas
-SUPABASE_URL = "https://iqzkxhcptdpgjnyytbaz.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlxemt4aGNwdGRwZ2pueXl0YmF6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjM1OTc3MiwiZXhwIjoyMDc3OTM1NzcyfQ.-_dSupP8Z0yVVc0OAbuoCtlRwig8T5P_CoO9Co5omqI"
+# Ler de variáveis de ambiente (Railway)
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("SUPABASE_URL e SUPABASE_KEY devem estar nas variáveis de ambiente")
 
 _supabase_client = None
 
