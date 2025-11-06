@@ -1,0 +1,37 @@
+name: Relatório Semanal
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Toda sexta-feira às 18h (UTC)
+    - cron: '0 18 * * 5'
+
+jobs:
+  weekly-report:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v3
+    
+    - name: Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Instalar dependências
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Gerar relatório
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      run: |
+        python scripts/data_loader.py
+        echo ""
+        echo "📊 RELATÓRIO SEMANAL"
+        echo "==================="
+        echo "✅ Sistema funcionando"
+        echo "📅 Última verificação: $(date)"
