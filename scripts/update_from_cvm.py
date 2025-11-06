@@ -217,8 +217,13 @@ def main():
     
     if dados:
         print(f"\n📊 Resumo do processamento:")
-        for tipo, count in dados.items():
-            print(f"   • {tipo}: {count:,} registros")
+        total_registros = 0
+        for tipo, info in dados.items():
+            registros = info['registros']
+            total_registros += registros
+            print(f"   • {tipo}: {registros:,} registros")
+        
+        print(f"\n   📈 TOTAL: {total_registros:,} registros processados")
         
         # Atualizar Supabase
         sucesso = atualizar_supabase(dados)
