@@ -346,7 +346,7 @@ def baixar_e_processar_itr(ano, arquivo, ultimos_trimestres):
         return None
 
 def atualizar_supabase(dados):
-    """Registra atualização no Supabase"""
+    """Atualiza dados no Supabase - UPLOAD REAL"""
     
     print("\n" + "="*70)
     print("📤 ATUALIZANDO SUPABASE")
@@ -355,34 +355,153 @@ def atualizar_supabase(dados):
     from config.supabase_config import supabase
     
     try:
+        # Consolidar todos os DataFrames em um único
+        print("🔄 Consolidando dados para upload...")
+        
+        dfs_para_upload = []
         total_registros = 0
         tipos_processados = []
         
         for tipo, info in dados.items():
-            if isinstance(info, dict) and 'registros' in info:
-                total_registros += info['registros']
-                tipos_processados.append(tipo)
+            if isinstance(info, dict) and 'dataframe' in info:
+                df = info['dataframe']
+                if len(df) > 0:
+                    # Adicionar coluna de tipo de demonstração
+                    df_copy = df.copy()
+                    df_copy['Tipo'] = tipo
+                    dfs_para_upload.append(df_copy)
+                    total_registros += len(df)
+                    tipos_processados.append(tipo)
         
+        if not dfs_para_upload:
+            print("⚠️  Nenhum dado novo para fazer upload")
+            return True
+        
+        # Consolidar em um único DataFrame
+        df_consolidado = pd.concat(dfs_para_upload, ignore_index=True)
+        
+        print(f"✅ Dados consolidados: {len(df_consolidado):,} registros")
+        print(f"   • Tipos: {', '.join(tipos_processados)}")
+        print(f"   • Empresas: {df_consolidado['Ticker'].nunique()}")
+        
+        # OPÇÃO 1: Salvar como novo arquivo Parquet e fazer upload
+        print("\n📦 Preparando arquivo Parquet para upload...")
+        
+        # Baixar arquivo atual
+        print("   📥 Baixando arquivo atual do Supabase...")
+        resultado = supabase.table('balancos_trimestrais') \
+            .select('arquivo_path') \
+            .eq('status', 'ativo') \
+            .order('data_upload', desc=True) \
+            .limit(1) \
+            .execute()
+        
+        if resultado.data:
+            arquivo_path_atual = resultado.data[0]['arquivo_path']
+            response = supabase.storage.from_('balancos').download(arquivo_path_atual)
+            df_atual = pd.read_parquet(BytesIO(response))
+            
+            print(f"   ✅ Arquivo atual carregado: {len(df_atual):,} registros")
+            
+            # Merge: remover duplicatas e adicionar novos
+            print("   🔀 Fazendo merge com dados existentes...")
+            
+            # Concatenar
+            df_merged = pd.concat([df_atual, df_consolidado], ignore_index=True)
+            
+            # Remover duplicatas (manter o mais recente)
+            df_merged = df_merged.drop_duplicates(
+                subset=['Ticker', 'Conta', 'Ano', 'Trimestre', 'Tipo'],
+                keep='last'
+            )
+            
+            print(f"   ✅ Após merge: {len(df_merged):,} registros totais")
+            print(f"   📈 Novos registros adicionados: {len(df_merged) - len(df_atual):,}")
+        else:
+            print("   ⚠️  Nenhum arquivo anterior, criando novo")
+            df_merged = df_consolidado
+        
+        # Salvar novo Parquet
+        print("\n   💾 Gerando novo arquivo Parquet...")
+        
+        # Criar arquivo em memória
+        buffer = BytesIO()
+        df_merged.to_parquet(buffer, index=False, compression='snappy')
+        buffer.seek(0)
+        
+        # Nome do arquivo com timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        novo_arquivo = f"dados/balancos_completo_{timestamp}.parquet"
+        
+        print(f"   📤 Fazendo upload: {novo_arquivo}")
+        
+        # Upload para Supabase Storage
+        supabase.storage.from_('balancos').upload(
+            novo_arquivo,
+            buffer.getvalue(),
+            file_options={"content-type": "application/octet-stream"}
+        )
+        
+        print(f"   ✅ Upload concluído!")
+        
+        # Atualizar tabela de controle
+        print("\n   📝 Atualizando tabela de controle...")
+        
+        # Desativar arquivo anterior
+        if resultado.data:
+            supabase.table('balancos_trimestrais') \
+                .update({'status': 'inativo'}) \
+                .eq('status', 'ativo') \
+                .execute()
+        
+        # Inserir novo registro
+        novo_registro = {
+            'arquivo_path': novo_arquivo,
+            'arquivo_nome': f'balancos_completo_{timestamp}.parquet',
+            'registros_total': len(df_merged),
+            'status': 'ativo',
+            'data_upload': datetime.now().isoformat()
+        }
+        
+        supabase.table('balancos_trimestrais').insert(novo_registro).execute()
+        
+        # Registrar no log
         log = {
             'tipo_atualizacao': 'automatica',
             'status': 'sucesso',
             'registros_novos': total_registros,
-            'mensagem': f'Processados {len(tipos_processados)} tipos: {", ".join(tipos_processados)}. Total: {total_registros:,} registros novos',
+            'registros_total': len(df_merged),
+            'mensagem': f'Adicionados {total_registros:,} novos registros. Total agora: {len(df_merged):,}',
             'data_execucao': datetime.now().isoformat()
         }
         
         supabase.table('log_atualizacoes').insert(log).execute()
         
-        print(f"✅ Log registrado no Supabase")
-        print(f"   • Total de registros novos: {total_registros:,}")
-        print(f"   • Tipos processados: {', '.join(tipos_processados)}")
+        print(f"\n✅ ATUALIZAÇÃO COMPLETA!")
+        print(f"   • Registros novos adicionados: {total_registros:,}")
+        print(f"   • Total de registros no Supabase: {len(df_merged):,}")
+        print(f"   • Arquivo: {novo_arquivo}")
         
         return True
         
     except Exception as e:
-        print(f"❌ Erro: {e}")
+        print(f"\n❌ Erro ao atualizar Supabase: {e}")
         import traceback
         traceback.print_exc()
+        
+        # Registrar erro no log
+        try:
+            log_erro = {
+                'tipo_atualizacao': 'automatica',
+                'status': 'erro',
+                'registros_novos': 0,
+                'mensagem': f'Erro: {str(e)[:500]}',
+                'data_execucao': datetime.now().isoformat()
+            }
+            supabase.table('log_atualizacoes').insert(log_erro).execute()
+        except:
+            pass
+        
         return False
 
 def main():
