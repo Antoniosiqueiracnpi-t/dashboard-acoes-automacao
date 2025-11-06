@@ -13,31 +13,47 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def transformar_wide_para_long(df, tipo_demonstracao):
+def transformar_wide_para_long(df, tipo_demonstracao, empresas):
     """
     Transforma dados do formato CVM (wide) para formato Supabase (long)
-    
-    Args:
-        df: DataFrame com dados da CVM
-        tipo_demonstracao: 'DRE', 'BPA', 'BPP', ou 'DFC'
-    
-    Returns:
-        DataFrame transformado no formato: Ticker, Conta, Ano, Trimestre, Valor
+    Filtra apenas empresas monitoradas
     """
     
     print(f"   🔄 Transformando {tipo_demonstracao} para formato long...")
     
     try:
         # Verificar colunas necessárias
-        colunas_necessarias = ['DENOM_CIA', 'DS_CONTA', 'DT_FIM_EXERC', 'VL_CONTA']
+        colunas_necessarias = ['CNPJ_CIA', 'DS_CONTA', 'DT_FIM_EXERC', 'VL_CONTA']
         
-        for col in colunas_necessarias:
-            if col not in df.columns:
-                print(f"   ⚠️  Coluna {col} não encontrada. Colunas disponíveis: {df.columns.tolist()[:10]}")
-                return None
+        # Tentar encontrar coluna de CNPJ (pode ter nomes diferentes)
+        coluna_cnpj = None
+        for possivel in ['CNPJ_CIA', 'CNPJ', 'CD_CVM']:
+            if possivel in df.columns:
+                coluna_cnpj = possivel
+                break
+        
+        if not coluna_cnpj:
+            print(f"   ⚠️  Coluna de CNPJ não encontrada. Colunas: {df.columns.tolist()[:10]}")
+            return None
         
         # Criar DataFrame limpo
-        df_clean = df[colunas_necessarias].copy()
+        colunas_usar = [coluna_cnpj, 'DS_CONTA', 'DT_FIM_EXERC', 'VL_CONTA']
+        df_clean = df[colunas_usar].copy()
+        
+        # Limpar CNPJ
+        df_clean[coluna_cnpj] = df_clean[coluna_cnpj].astype(str).str.replace('.', '').str.replace('/', '').str.replace('-', '').str.zfill(14)
+        
+        # FILTRAR APENAS EMPRESAS MONITORADAS
+        cnpjs_monitorados = list(empresas['por_cnpj'].keys())
+        
+        if cnpjs_monitorados:
+            print(f"   🔍 Filtrando por {len(cnpjs_monitorados)} CNPJs monitorados...")
+            df_clean = df_clean[df_clean[coluna_cnpj].isin(cnpjs_monitorados)]
+            print(f"   ✅ Após filtro: {len(df_clean):,} registros")
+        
+        if len(df_clean) == 0:
+            print(f"   ⚠️  Nenhum registro das empresas monitoradas encontrado")
+            return None
         
         # Limpar valores
         df_clean = df_clean.dropna(subset=['VL_CONTA', 'DT_FIM_EXERC'])
@@ -53,9 +69,11 @@ def transformar_wide_para_long(df, tipo_demonstracao):
         df_clean['Ano'] = df_clean['DT_FIM_EXERC'].dt.year
         df_clean['Trimestre'] = df_clean['DT_FIM_EXERC'].dt.quarter
         
-        # Mapear nome da empresa para Ticker (simplificado)
-        # TODO: Implementar mapeamento correto CNPJ → Ticker
-        df_clean['Ticker'] = df_clean['DENOM_CIA'].str[:5].str.upper()
+        # Mapear CNPJ para Ticker
+        df_clean['Ticker'] = df_clean[coluna_cnpj].map(empresas['por_cnpj'])
+        
+        # Remover registros sem ticker (empresas não monitoradas que passaram)
+        df_clean = df_clean.dropna(subset=['Ticker'])
         
         # Renomear colunas
         df_long = df_clean[[
@@ -75,6 +93,7 @@ def transformar_wide_para_long(df, tipo_demonstracao):
         )
         
         print(f"   ✅ Transformado: {len(df_long):,} registros únicos")
+        print(f"   📊 Tickers únicos encontrados: {df_long['Ticker'].nunique()}")
         
         return df_long
         
@@ -225,26 +244,54 @@ def filtrar_dados_novos(df_transformado, ultimos_trimestres):
 
 
 def obter_lista_empresas():
-    """Retorna lista de CNPJs das 133 empresas monitoradas"""
+    """Retorna dicionário com CNPJ e Ticker das 133 empresas monitoradas"""
     from config.supabase_config import supabase
     
     try:
         resultado = supabase.table('empresas_ativas') \
-            .select('ticker, cnpj') \
+            .select('ticker, cnpj, razao_social') \
             .eq('status', 'ativa') \
             .execute()
         
-        empresas = {row['ticker']: row.get('cnpj', '') for row in resultado.data}
-        print(f"✅ Carregadas {len(empresas)} empresas do Supabase")
-        return empresas
+        # Criar dicionário CNPJ → Ticker
+        empresas_cnpj = {}
+        empresas_ticker = {}
+        
+        for row in resultado.data:
+            ticker = row['ticker']
+            cnpj = row.get('cnpj', '').replace('.', '').replace('/', '').replace('-', '')
+            razao_social = row.get('razao_social', '')
+            
+            if cnpj:
+                empresas_cnpj[cnpj] = ticker
+            
+            empresas_ticker[ticker] = {
+                'cnpj': cnpj,
+                'razao_social': razao_social
+            }
+        
+        print(f"✅ Carregadas {len(empresas_ticker)} empresas do Supabase")
+        print(f"   • Com CNPJ: {len(empresas_cnpj)} empresas")
+        
+        return {
+            'por_cnpj': empresas_cnpj,
+            'por_ticker': empresas_ticker,
+            'tickers': list(empresas_ticker.keys())
+        }
         
     except Exception as e:
-        print(f"⚠️  Erro ao carregar empresas, usando lista padrão: {e}")
-        # Fallback: usar lista de tickers
+        print(f"⚠️  Erro ao carregar empresas: {e}")
+        # Fallback com lista fixa das 133 empresas
+        tickers_fixos = [
+            'ABEV3', 'ALPA4', 'ALUP3', 'AMAR3', 'AMBP3', 'ANIM3', 'AZZA3',
+            'AZUL4', 'BBAS3', 'BBDC4', 'BEEF3', 'BPAC11', 'BPAN4', 'BRAP4',
+            'BRFS3', 'BRIT3', 'CASH3', 'CBAV3', 'CCRO3', 'CEAB3', 'CEDO3',
+            # ... (adicionar todos os 133)
+        ]
         return {
-            'ABEV3': '', 'ALPA4': '', 'ALUP3': '', 'AMAR3': '', 'AMBP3': '',
-            'ANIM3': '', 'AZZA3': '', 'AZUL4': '', 'BBAS3': '', 'BBDC4': '',
-            # ... (continua com todos os 133 tickers)
+            'por_cnpj': {},
+            'por_ticker': {t: {'cnpj': '', 'razao_social': ''} for t in tickers_fixos},
+            'tickers': tickers_fixos
         }
 
 def verificar_ultimo_trimestre_disponivel():
@@ -355,7 +402,7 @@ def baixar_e_processar_itr(ano, arquivo, empresas, ultimos_trimestres):
                     
 
                     # Transformar para formato long
-                    df_long = transformar_wide_para_long(df_filtrado, tipo)
+                    df_long = transformar_wide_para_long(df_filtrado, tipo, empresas)
 
                     if df_long is not None:
                         # Filtrar apenas dados novos
