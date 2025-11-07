@@ -1,109 +1,112 @@
-"""Funções para carregar dados do Supabase"""
+"""
+Módulo para carregar e processar dados do Supabase
+Versão com normalização de contas
+"""
+
 import pandas as pd
 from io import BytesIO
-from typing import Tuple
-import sys
-import os
+from config.supabase_config import supabase
+from scripts.processador_dados import aplicar_normalizacao, anualizar_trimestres
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-_cache_df = None
-
-def carregar_dados_completos(force_reload: bool = False) -> pd.DataFrame:
-    """Carrega dados do Supabase"""
-    global _cache_df
-    
-    if not force_reload and _cache_df is not None:
-        print("✓ Usando cache")
-        return _cache_df.copy()
-    
-    print("📥 Baixando do Supabase...")
-    
+def carregar_dados_completos():
+    """
+    Carrega todos os dados disponíveis no Supabase
+    Retorna DataFrame normalizado
+    """
     try:
-        from config.supabase_config import supabase
-        
+        # Buscar arquivo ativo mais recente
         resultado = supabase.table('balancos_trimestrais') \
-            .select('arquivo_path, arquivo_nome, registros_total') \
+            .select('arquivo_path') \
             .eq('status', 'ativo') \
             .order('data_upload', desc=True) \
             .limit(1) \
             .execute()
         
         if not resultado.data:
-            raise ValueError("Nenhum arquivo encontrado")
+            print("❌ Nenhum arquivo ativo encontrado")
+            return None
         
         arquivo_path = resultado.data[0]['arquivo_path']
-        print(f"   Arquivo: {resultado.data[0]['arquivo_nome']}")
         
+        # Download do Parquet
         response = supabase.storage.from_('balancos').download(arquivo_path)
         df = pd.read_parquet(BytesIO(response))
         
-        _cache_df = df
-        print(f"✅ {len(df):,} registros carregados")
-        return df.copy()
+        # Aplicar normalização
+        df_normalizado = aplicar_normalizacao(df)
+        
+        return df_normalizado
         
     except Exception as e:
-        print(f"❌ Erro: {e}")
-        raise
+        print(f"❌ Erro ao carregar dados: {e}")
+        return None
 
-def selecionar_empresa(ticker: str, tipo: str = 'DRE') -> Tuple[pd.DataFrame, str]:
-    df_long = carregar_dados_completos()
-    df_empresa = df_long[df_long['Ticker'] == ticker].copy()
-    if df_empresa.empty:
-        return None, None
-    df_wide = df_empresa.pivot_table(index='Conta', columns=['Ano', 'Trimestre'], values='Valor', aggfunc='first').reset_index()
-    new_cols = ['Conta']
-    for col in df_wide.columns[1:]:
-        if isinstance(col, tuple):
-            new_cols.append(f"{col[0]}_{col[1]}")
-        else:
-            new_cols.append(str(col))
-    df_wide.columns = new_cols
-    return df_wide, ticker
-
-def selecionar_empresa_trimestral(ticker: str, tipo: str = 'DRE') -> Tuple[pd.DataFrame, str]:
-    return selecionar_empresa(ticker, tipo)
-
-def selecionar_empresa_periodo(ticker: str, tipo: str = 'DRE', periodo: str = 'trimestre') -> Tuple[pd.DataFrame, str]:
-    return selecionar_empresa(ticker, tipo)
-
-def selecionar_balanco_periodo(ticker: str, tipo: str = 'BPA', periodo: str = 'trimestre') -> Tuple[pd.DataFrame, str]:
-    return selecionar_empresa(ticker, tipo)
-
-def listar_todas_empresas() -> list:
+def selecionar_empresa(ticker):
+    """
+    Seleciona dados de uma empresa específica
+    Retorna tupla (DataFrame, nome_empresa)
+    """
     try:
-        from config.supabase_config import supabase
-        resultado = supabase.table('empresas_ativas').select('ticker').eq('status', 'ativa').execute()
-        return [row['ticker'] for row in resultado.data]
-    except:
+        df_completo = carregar_dados_completos()
+        
+        if df_completo is None or df_completo.empty:
+            return None, None
+        
+        # Filtrar por ticker
+        df_empresa = df_completo[df_completo['Ticker'] == ticker].copy()
+        
+        if df_empresa.empty:
+            return None, None
+        
+        # Buscar nome da empresa
+        resultado_empresa = supabase.table('empresas_ativas') \
+            .select('razao_social') \
+            .eq('ticker', ticker) \
+            .limit(1) \
+            .execute()
+        
+        nome = resultado_empresa.data[0]['razao_social'] if resultado_empresa.data else ticker
+        
+        return df_empresa, nome
+        
+    except Exception as e:
+        print(f"❌ Erro ao selecionar empresa: {e}")
+        return None, None
+
+def listar_todas_empresas():
+    """
+    Retorna lista de tickers disponíveis
+    """
+    try:
+        df = carregar_dados_completos()
+        
+        if df is None or df.empty:
+            return []
+        
+        return sorted(df['Ticker'].unique().tolist())
+        
+    except Exception as e:
+        print(f"❌ Erro ao listar empresas: {e}")
         return []
 
-def testar_conexao():
-    print("="*60)
-    print("🧪 TESTANDO CONEXÃO")
-    print("="*60)
+def obter_dados_anualizados(ticker=None):
+    """
+    Retorna dados anualizados
+    Se ticker for None, retorna para todas as empresas
+    """
     try:
-        print("\n1️⃣  Listando empresas...")
-        empresas = listar_todas_empresas()
-        print(f"   ✓ {len(empresas)} empresas")
-        print(f"   Primeiras 5: {empresas[:5]}")
-        print("\n2️⃣  Carregando dados...")
         df = carregar_dados_completos()
-        print(f"   ✓ {len(df):,} registros")
-        print("\n3️⃣  Selecionando PETR4...")
-        df_petr4, nome = selecionar_empresa('PETR4')
-        if df_petr4 is not None:
-            print(f"   ✓ Shape: {df_petr4.shape}")
-            print(f"   ✓ Colunas: {list(df_petr4.columns[:5])}")
-        print("\n" + "="*60)
-        print("✅ TODOS OS TESTES OK!")
-        print("="*60)
-        return True
+        
+        if df is None or df.empty:
+            return None
+        
+        if ticker:
+            df = df[df['Ticker'] == ticker].copy()
+        
+        df_anual = anualizar_trimestres(df, ticker)
+        
+        return df_anual
+        
     except Exception as e:
-        print(f"\n❌ ERRO: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-if __name__ == "__main__":
-    testar_conexao()
+        print(f"❌ Erro ao anualizar dados: {e}")
+        return None
