@@ -4,5 +4,5 @@ python-dotenv==1.0.0
 requests==2.31.0
 streamlit==1.28.0
 plotly==5.17.0
-supabase-py==0.0.2
-postgrest-py==0.10.6
+supabase==1.0.3
+httpx==0.24.1
